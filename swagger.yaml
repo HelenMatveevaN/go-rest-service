@@ -1,0 +1,256 @@
+openapi: 3.0.3
+info:
+  title: Subscription REST API Service
+  description: Сервис управления подписками пользователей с калькулятором стоимости за период.
+  version: 1.0.0
+servers:
+  - url: http://localhost:8087/api/v1
+    description: Локальный сервер разработки
+
+paths:
+  /subscriptions:
+    post:
+      summary: Создать новую подписку
+      description: Принимает данные подписки и сохраняет её в PostgreSQL с генерацией UUID.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateInput'
+      responses:
+        '201':
+          description: Подписка успешно создана
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+        '400':
+          description: Невалидный JSON или ошибка валидации полей
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    get:
+      summary: Получить список всех подписок
+      description: Возвращает список подписок с возможностью фильтрации по ID пользователя.
+      parameters:
+        - name: user_id
+          in: query
+          required: false
+          description: UUID пользователя для фильтрации списка
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Успешный возврат списка
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Subscription'
+                  total:
+                    type: integer
+                    example: 1
+
+  /subscriptions/{id}:
+    get:
+      summary: Получить подписку по ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: UUID подписки
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Подписка найдена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+        '404':
+          description: Подписка с таким ID не найдена
+
+    patch:
+      summary: Частично обновить подписку (PATCH)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: UUID подписки
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateInput'
+      responses:
+        '200':
+          description: Подписка успешно обновлена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+        '400':
+          description: Ошибка валидации или неверный формат даты
+        '404':
+          description: Подписка не найдена
+
+    delete:
+      summary: Удалить подписку
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: UUID подписки
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Подписка успешно удалена (пустое тело)
+        '404':
+          description: Подписка не найдена
+
+  /subscriptions/total-price:
+    get:
+      summary: Подсчет суммарной стоимости за выбранный период
+      description: Рассчитывает стоимость с учетом пересечения дат активности подписок и выбранного периода.
+      parameters:
+        - name: user_id
+          in: query
+          required: true
+          description: UUID пользователя
+          schema:
+            type: string
+            format: uuid
+        - name: from
+          in: query
+          required: true
+          description: Дата начала периода в формате MM-YYYY
+          schema:
+            type: string
+            example: "07-2025"
+        - name: to
+          in: query
+          required: true
+          description: Дата окончания периода в формате MM-YYYY
+          schema:
+            type: string
+            example: "09-2025"
+        - name: service_name
+          in: query
+          required: false
+          description: Опциональный фильтр по конкретному названию подписки
+          schema:
+            type: string
+            example: "Yandex Plus"
+      responses:
+        '200':
+          description: Успешный расчет стоимости
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total_cost:
+                    type: integer
+                    description: Итоговая сумма в рублях
+                    example: 1200
+        '400':
+          description: Ошибка валидации параметров или неверный формат периода
+
+components:
+  schemas:
+    Subscription:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "b215efcd-869c-4a1d-a0d8-b089755ed70a"
+        service_name:
+          type: string
+          example: "Yandex Plus"
+        price:
+          type: integer
+          example: 400
+        user_id:
+          type: string
+          format: uuid
+          example: "60601fee-2bf1-4721-ae6f-7636e79a0cba"
+        start_date:
+          type: string
+          format: date-time
+          example: "2025-07-01T00:00:00Z"
+        end_date:
+          type: string
+          format: date-time
+          nullable: true
+          example: null
+        created_at:
+          type: string
+          format: date-time
+          example: "2026-06-04T14:07:54Z"
+
+    CreateInput:
+      type: object
+      required:
+        - service_name
+        - price
+        - user_id
+        - start_date
+      properties:
+        service_name:
+          type: string
+          example: "Yandex Plus"
+        price:
+          type: integer
+          minimum: 1
+          example: 400
+        user_id:
+          type: string
+          format: uuid
+          example: "60601fee-2bf1-4721-ae6f-7636e79a0cba"
+        start_date:
+          type: string
+          description: Формат MM-YYYY
+          example: "07-2025"
+        end_date:
+          type: string
+          description: Опциональный формат MM-YYYY
+          nullable: true
+          example: "12-2025"
+
+    UpdateInput:
+      type: object
+      properties:
+        service_name:
+          type: string
+          example: "Yandex Plus (Premium)"
+        price:
+          type: integer
+          example: 450
+        end_date:
+          type: string
+          nullable: true
+          example: null
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+          example: "Validation failed: missing fields"
