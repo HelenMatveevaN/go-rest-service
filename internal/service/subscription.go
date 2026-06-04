@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/google/uuid"
+
 	"go-rest-service/internal/domain"
 )
 
@@ -36,10 +39,13 @@ func (s *SubscriptionService) Create(ctx context.Context, input domain.CreateInp
 		return domain.Subscription{}, domain.ErrInvalidDates
 	}
 
-	mockID := "sub-" + time.Now().Format("20060102150405")
+	// Вместо mockID со строкой "sub-..." генерируем настоящий UUID v4, 
+	// который полностью удовлетворяет требованиям PostgreSQL к типу данных UUID.
+	realUUID := uuid.New().String()
+	//mockID := "sub-" + time.Now().Format("20060102150405")
 
 	newSub := domain.Subscription{
-		ID:          mockID,
+		ID:          realUUID, // Используем валидный UUID //mockID,
 		ServiceName: input.ServiceName,
 		Price:       input.Price,
 		UserID:      input.UserID,
@@ -104,12 +110,12 @@ func (s *SubscriptionService) List(ctx context.Context, userID string) ([]domain
 func (s *SubscriptionService) GetTotalCost(ctx context.Context, userID, ServiceName, fromStr, toStr string) (domain.GetTotalCostOutput, error) {
 	
 	// 1. Валидация дат
-	fromTime, err := time.Parse("01-2026", fromStr)
+	fromTime, err := time.Parse("01-2006", fromStr)
 	if err != nil {
 		return domain.GetTotalCostOutput{}, fmt.Errorf("invalid 'from' date format: %w", err)
 	}
 
-	toTime, err := time.Parse("01-2026", toStr)
+	toTime, err := time.Parse("01-2006", toStr)
 	if err != nil {
 		return domain.GetTotalCostOutput{}, fmt.Errorf("invalid 'to' date format: %w", err)
 	}
