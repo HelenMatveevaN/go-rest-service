@@ -2,8 +2,9 @@ package repository
 
 import (
 	"context"
-	"fmt"
 	"database/sql"
+	"fmt"
+	"log"
 	
 	"go-rest-service/internal/domain"
 )
@@ -32,6 +33,7 @@ func (r *PostgresRepository) Save(ctx context.Context, sub domain.Subscription) 
 
 	// Выполняем запрос в базу данных.
 	// Функция ExecContext принимает контекст, сам запрос и по порядку подставляет значения вместо $1, $2...
+	log.Printf("[DATABASE] Выполнение INSERT для подписки ID: %s, Service: %s", sub.ID, sub.ServiceName)
 	_, err := r.db.ExecContext(
 		ctx, 
 		query, 
@@ -44,6 +46,7 @@ func (r *PostgresRepository) Save(ctx context.Context, sub domain.Subscription) 
 		sub.CreatedAt,
 	)
 	if err != nil {
+		log.Printf("[DATABASE ERROR] Ошибка INSERT подписки %s: %v", sub.ID, err)
 		return err
 	}
 
@@ -72,10 +75,61 @@ func (r *PostgresRepository) GetByID(ctx context.Context, id string) (domain.Sub
 		&sub.CreatedAt,
 	)
 	if err != nil {
+		if err == sql.ErrNoRows {
+			log.Printf("[DATABASE WARN] Запись с id %s не найдена", id)
+			return domain.Subscription{}, err
+		}
+		log.Printf("[DATABASE ERROR] Ошибка SELECT по id %s: %v", id, err)
 		return domain.Subscription{}, err
 	}
 
 	return sub, nil
+}
+
+
+
+// Update полностью перезаписывает измененную модель подписки в базе данных
+func (r *PostgresRepository) Update(ctx context.Context, sub domain.Subscription) error {
+	query := `
+		UPDATE subscriptions 
+		SET service_name = $1, price = $2, end_date = $3 
+		WHERE id = $4
+	`
+
+	log.Printf("[DATABASE] Выполнение UPDATE для подписки ID: %s", sub.ID)
+	_, err := r.db.ExecContext(ctx, query, sub.ServiceName, sub.Price, sub.EndDate, sub.ID)
+	if err != nil {
+		log.Printf("[DATABASE ERROR] Ошибка UPDATE подписки %s: %v", sub.ID, err)
+		return err
+	}
+
+	return nil
+}
+
+// Delete физически удаляет запись о подписке по её UUID
+func (r *PostgresRepository) Delete(ctx context.Context, id string) error {
+	query := `DELETE FROM subscriptions WHERE id = $1`
+
+	log.Printf("[DATABASE] Выполнение DELETE для id: %s", id)
+	res, err := r.db.ExecContext(ctx, query, id)
+	if err != nil {
+		log.Printf("[DATABASE ERROR] Ошибка DELETE для id %s: %v", id, err)
+		return err
+	}
+
+	// Полезная проверка: узнаем, удалилось ли что-то на самом деле
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	// Если база говорит, что удалено 0 строк, значит записи с таким ID не существовало
+	if rowsAffected == 0 {
+		log.Printf("[DATABASE WARN] Нечего удалять, id %s не найден", id)
+		return fmt.Errorf("subscription not found")
+	}
+
+	return nil
 }
 
 // List вытаскивает список подписок с фильтрацией по user_id
@@ -89,8 +143,10 @@ func (r *PostgresRepository) List(ctx context.Context, userID string) ([]domain.
 	`
 
 	// QueryContext используется для получения множества строк (списка)
+	log.Printf("[DATABASE] Выполнение SELECT LIST для user_id: %s", userID)
 	rows, err := r.db.QueryContext(ctx, query, userID)
 	if err != nil {
+		log.Printf("[DATABASE ERROR] Ошибка SELECT LIST для user_id %s: %v", userID, err)
 		return nil, err
 	}
 	// Обязательно закрываем rows в самом конце работы функции, чтобы освободить соединение с базой
@@ -113,9 +169,9 @@ func (r *PostgresRepository) List(ctx context.Context, userID string) ([]domain.
 			&sub.CreatedAt,
 		)
 		if err != nil {
+			log.Printf("[DATABASE ERROR] Ошибка сканирования строки списка: %v", err)
 			return nil, err
 		}
-		
 		list = append(list, sub)
 	}
 
@@ -127,45 +183,6 @@ func (r *PostgresRepository) List(ctx context.Context, userID string) ([]domain.
 	return list, nil
 }
 
-// Update полностью перезаписывает измененную модель подписки в базе данных
-func (r *PostgresRepository) Update(ctx context.Context, sub domain.Subscription) error {
-	query := `
-		UPDATE subscriptions 
-		SET service_name = $1, price = $2, end_date = $3 
-		WHERE id = $4
-	`
-
-	_, err := r.db.ExecContext(ctx, query, sub.ServiceName, sub.Price, sub.EndDate, sub.ID)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// Delete физически удаляет запись о подписке по её UUID
-func (r *PostgresRepository) Delete(ctx context.Context, id string) error {
-	query := `DELETE FROM subscriptions WHERE id = $1`
-
-	res, err := r.db.ExecContext(ctx, query, id)
-	if err != nil {
-		return err
-	}
-
-	// Полезная проверка: узнаем, удалилось ли что-то на самом деле
-	rowsAffected, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
-
-	// Если база говорит, что удалено 0 строк, значит записи с таким ID не существовало
-	if rowsAffected == 0 {
-		return fmt.Errorf("subscription not found")
-	}
-
-	return nil
-}
-
 // GetByFilters вытаскивает подписки пользователя с возможностью фильтрации по имени сервиса
 func (r *PostgresRepository) GetByFilters(ctx context.Context, userID, serviceName string) ([]domain.Subscription, error) {
 	// Пишем точечный SQL-запрос вместо старого перебора циклом for по всей карте памяти!
@@ -175,8 +192,10 @@ func (r *PostgresRepository) GetByFilters(ctx context.Context, userID, serviceNa
 		WHERE user_id = $1::uuid AND ($2 = '' OR service_name = $2)
 	`
 
+	log.Printf("[DATABASE] Выполнение SELECT по фильтрам для user_id: %s, Service: %s", userID, serviceName)
 	rows, err := r.db.QueryContext(ctx, query, userID, serviceName)
 	if err != nil {
+		log.Printf("[DATABASE ERROR] Ошибка SELECT по фильтрам: %v", err)
 		return nil, err
 	}
 	defer rows.Close()

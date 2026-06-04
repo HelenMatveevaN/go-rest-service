@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/google/uuid"
@@ -21,8 +22,11 @@ func NewSubscriptionService(repo domain.SubscriptionRepository) *SubscriptionSer
 }
 
 func (s *SubscriptionService) Create(ctx context.Context, input domain.CreateInput) (domain.Subscription, error) {
+	log.Printf("[DEBUG] Сервис: Начало создания подписки на сервис '%s' для пользователя: %s", input.ServiceName, input.UserID)
+
 	startDate, err := time.Parse("01-2006", input.StartDate)
 	if err != nil {
+		log.Printf("[ERROR] Сервис: Ошибка парсинга start_date '%s': %v", input.StartDate, err)
 		return domain.Subscription{}, err
 	}
 
@@ -30,22 +34,22 @@ func (s *SubscriptionService) Create(ctx context.Context, input domain.CreateInp
 	if input.EndDate != nil {
 		parsedEnd, err := time.Parse("01-2006", *input.EndDate)
 		if err != nil {
+			log.Printf("[ERROR] Сервис: Ошибка парсинга end_date '%s': %v", *input.EndDate, err)
 			return domain.Subscription{}, err
 		}
 		endDate = &parsedEnd
 	}
 
 	if endDate != nil && endDate.Before(startDate) {
+		log.Printf("[WARN] Сервис: Нарушена бизнес-логика: end_date (%s) раньше start_date (%s)", *input.EndDate, input.StartDate)
 		return domain.Subscription{}, domain.ErrInvalidDates
 	}
 
-	// Вместо mockID со строкой "sub-..." генерируем настоящий UUID v4, 
-	// который полностью удовлетворяет требованиям PostgreSQL к типу данных UUID.
+	// Сгенерируем UUID
 	realUUID := uuid.New().String()
-	//mockID := "sub-" + time.Now().Format("20060102150405")
 
 	newSub := domain.Subscription{
-		ID:          realUUID, // Используем валидный UUID //mockID,
+		ID:          realUUID,
 		ServiceName: input.ServiceName,
 		Price:       input.Price,
 		UserID:      input.UserID,
@@ -55,19 +59,25 @@ func (s *SubscriptionService) Create(ctx context.Context, input domain.CreateInp
 	}
 
 	if err := s.repo.Save(ctx, newSub); err != nil {
+		log.Printf("[ERROR] Сервис: Ошибка сохранения подписки в репозиторий: %v", err)
 		return domain.Subscription{}, err
 	}
 
+	log.Printf("[DEBUG] Сервис: Подписка успешно сформирована и передана в репозиторий с ID: %s", newSub.ID)
 	return newSub, nil
 }
 
 func (s *SubscriptionService) GetByID(ctx context.Context, id string) (domain.Subscription, error) {
+	log.Printf("[DEBUG] Сервис: Запрос подписки по ID: %s", id)
 	return s.repo.GetByID(ctx, id)
 }
 
 func (s *SubscriptionService) Update(ctx context.Context, id string, input domain.UpdateInput) (domain.Subscription, error) {
+	log.Printf("[DEBUG] Сервис: Начало процесса обновления подписки с ID: %s", id)
+
 	sub, err := s.repo.GetByID(ctx, id)
 	if err != nil {
+		log.Printf("[WARN] Сервис: Не удалось обновить, подписка %s не найдена: %v", id, err)
 		return domain.Subscription{}, err
 	}
 
@@ -80,12 +90,15 @@ func (s *SubscriptionService) Update(ctx context.Context, id string, input domai
 	if input.EndDate != nil {
 		if *input.EndDate == nil {
 			sub.EndDate = nil
+			log.Printf("[DEBUG] Сервис: Сброс даты окончания подписки %s (подписка стала бессрочной)", id)
 		} else {
 			parsedEnd, err := time.Parse("01-2006", **input.EndDate)
 			if err != nil {
+				log.Printf("[ERROR] Сервис: Ошибка парсинга новой end_date '%s': %v", **input.EndDate, err)
 				return domain.Subscription{}, err
 			}
 			if parsedEnd.Before(sub.StartDate) {
+				log.Printf("[WARN] Сервис: Нарушена бизнес-логика при обновлении: новая end_date раньше start_date")
 				return domain.Subscription{}, domain.ErrInvalidDates
 			}
 			sub.EndDate = &parsedEnd
@@ -93,22 +106,27 @@ func (s *SubscriptionService) Update(ctx context.Context, id string, input domai
 	}
 
 	if err := s.repo.Update(ctx, sub); err != nil {
+		log.Printf("[ERROR] Сервис: Не удалось обновить запись %s в репозитории: %v", id, err)
 		return domain.Subscription{}, err
 	}
 
+	log.Printf("[DEBUG] Сервис: Запись %s успешно обновлена", id)
 	return sub, nil
 }
 
 func (s *SubscriptionService) Delete(ctx context.Context, id string) error {
+	log.Printf("[DEBUG] Сервис: Удаление подписки по ID: %s", id)
 	return s.repo.Delete(ctx, id)
 }
 
 func (s *SubscriptionService) List(ctx context.Context, userID string) ([]domain.Subscription, error) {
+	log.Printf("[DEBUG] Сервис: Запрос списка подписок для user_id: %s", userID)
 	return s.repo.List(ctx, userID)
 }
 
-func (s *SubscriptionService) GetTotalCost(ctx context.Context, userID, ServiceName, fromStr, toStr string) (domain.GetTotalCostOutput, error) {
-	
+func (s *SubscriptionService) GetTotalCost(ctx context.Context, userID, serviceName, fromStr, toStr string) (domain.GetTotalCostOutput, error) {
+	log.Printf("[DEBUG] Сервис: Начало расчета стоимости для user_id: %s за период %s - %s (фильтр сервиса: '%s')", userID, fromStr, toStr, serviceName)
+
 	// 1. Валидация дат
 	fromTime, err := time.Parse("01-2006", fromStr)
 	if err != nil {
@@ -126,10 +144,12 @@ func (s *SubscriptionService) GetTotalCost(ctx context.Context, userID, ServiceN
 	}
 
 	// 2. Достаем подписки из репозитория
-	subs, err := s.repo.GetByFilters(ctx, userID, ServiceName)
+	subs, err := s.repo.GetByFilters(ctx, userID, serviceName)
 	if err != nil {
 		return domain.GetTotalCostOutput{}, err
 	}
+
+	log.Printf("[DEBUG] Сервис: Найдено %d подписок для расчета стоимости", len(subs))
 
 	totalCost := 0
 
@@ -165,5 +185,6 @@ func (s *SubscriptionService) GetTotalCost(ctx context.Context, userID, ServiceN
 		totalCost += monthsCount * sub.Price
 	}
 
+	log.Printf("[DEBUG] Сервис: Расчет завершен. Суммарная стоимость: %d руб.", totalCost)
 	return domain.GetTotalCostOutput{TotalCost: totalCost}, nil
 }
