@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  # 1. СЛУЖБА БАЗЫ ДАННЫХ (PostgreSQL)
+  postgres_db:
+    image: postgres:15-alpine
+    container_name: subscription_postgres
+    # Переменные окружения для инициализации базы данных
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: supersecretpassword # Задаем надежный пароль для контейнера
+      POSTGRES_DB: subscription_db           # База данных создастся автоматически!
+    # Пробрасываем порт наружу, чтобы ты могла подключиться к базе с Mac (например, через psql)
+    ports:
+      - "5432:5432"
+    # Создаем именованный том, чтобы данные в базе не стирались при перезапуске контейнеров
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # Настройка проверки здоровья (healthcheck)
+    # Она нужна, чтобы наше Go-приложение знало, когда база РЕАЛЬНО готова принимать запросы
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d subscription_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 2. СЛУЖБА НАШЕГО GO REST-СЕРВИСА
+  api_service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: subscription_api
+    ports:
+      - "8087:8087"
+    # Передаем конфигурационные данные прямо в переменные окружения контейнера
+    environment:
+      SERVER_PORT: ":8087"
+      # ВАЖНО: Вместо localhost в адресе базы мы пишем имя службы 'postgres_db'.
+      # Docker сам поймет, куда отправлять трафик внутри своей сети.
+      DB_URL: "postgres://postgres:supersecretpassword@postgres_db:5432/subscription_db?sslmode=disable"
+    # Говорим Docker запускать бэкенд строго ПОСЛЕ того, как база успешно пройдет healthcheck
+    depends_on:
+      postgres_db:
+        condition: service_healthy
+
+# Объявляем наш том для постоянного хранения данных базы
+volumes:
+  pgdata:
