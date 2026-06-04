@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"time"
 	"go-rest-service/internal/domain"
 )
@@ -98,4 +99,65 @@ func (s *SubscriptionService) Delete(ctx context.Context, id string) error {
 
 func (s *SubscriptionService) List(ctx context.Context, userID string) ([]domain.Subscription, error) {
 	return s.repo.List(ctx, userID)
+}
+
+func (s *SubscriptionService) GetTotalCost(ctx context.Context, userID, ServiceName, fromStr, toStr string) (domain.GetTotalCostOutput, error) {
+	
+	// 1. Валидация дат
+	fromTime, err := time.Parse("01-2026", fromStr)
+	if err != nil {
+		return domain.GetTotalCostOutput{}, fmt.Errorf("invalid 'from' date format: %w", err)
+	}
+
+	toTime, err := time.Parse("01-2026", toStr)
+	if err != nil {
+		return domain.GetTotalCostOutput{}, fmt.Errorf("invalid 'to' date format: %w", err)
+	}
+
+	// Валидация: begin не м.б. > end
+	if toTime.Before(fromTime) {
+		return domain.GetTotalCostOutput{}, fmt.Errorf("'from' date cannot be after 'to' date")
+	}
+
+	// 2. Достаем подписки из репозитория
+	subs, err := s.repo.GetByFilters(ctx, userID, ServiceName)
+	if err != nil {
+		return domain.GetTotalCostOutput{}, err
+	}
+
+	totalCost := 0
+
+	// 3. Подсчет стоимости подписки
+	for _, sub := range subs {
+		//реальная дата начала пересечения
+		//get max date between началом подписки и началом выбранного периода
+		startIntersection := sub.StartDate
+		if fromTime.After(startIntersection) {
+			startIntersection = fromTime
+		}
+
+		//реальная дата окончания пересечения
+		//get min date between окончанием подписки и окончанием выбранного периода
+		endIntersection := toTime
+		if sub.EndDate != nil && sub.EndDate.Before(endIntersection) {
+			endIntersection = *sub.EndDate
+		}
+
+		//Если endIntersection < startIntersection, пересечений нет
+		if endIntersection.Before(startIntersection){
+			continue
+		}
+
+		//Считаем кол-во месяцев м.у. startIntersection и endIntersection
+		//включая пограничные месяцы
+		yearsDiff := endIntersection.Year() - startIntersection.Year()
+		monthsDiff := int(endIntersection.Month()) - int(startIntersection.Month())
+
+		monthsCount := yearsDiff*12 + monthsDiff + 1
+
+		//Прибавляем к общей сумме
+		totalCost += monthsCount * sub.Price
+	}
+
+	return domain.GetTotalCostOutput{TotalCost: totalCost}, nil
 }

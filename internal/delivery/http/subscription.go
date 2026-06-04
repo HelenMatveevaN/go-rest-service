@@ -31,6 +31,16 @@ func (h *Handler) handleSubscriptionsWithID(w http.ResponseWriter, r *http.Reque
 
 	id := strings.TrimPrefix(r.URL.Path, "/api/v1/subscriptions/")
 
+	//перехыватываем ручку подсчета стоимости
+	if id == "total-price" {
+		if r.Method == http.MethodGet {
+			h.getTotalCost(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
 	if id == "" {
 		h.handleSubscriptions(w, r)
 		return
@@ -137,4 +147,35 @@ func (h *Handler) listSubscriptions(w http.ResponseWriter, r *http.Request) {
 		"data":  list,
 		"total": len(list),
 	})
+}
+
+func (h *Handler) getTotalCost(w http.ResponseWriter, r *http.Request) {
+	//достаем query-параметры из url
+	query := r.URL.Query()
+
+	userID := query.Get("user_id")
+	serviceName := query.Get("service_name") //option
+	fromStr := query.Get("from")
+	toStr := query.Get("to")
+
+	//валидация: проверка обяз.парам-ов на пустоту
+	//и длины UUID польз-ля (36 симв.)
+	if len(userID) != 36 || fromStr == "" || toStr == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Validation failed: 'user_id' (valid UUIDv4), 'from' and 'to' parameters are required",
+		})
+		return
+	}
+
+	//вызов слоя бизнес-логики (сервис), если валидация прошла успешно
+	output, err := h.service.GetTotalCost(r.Context(), userID, serviceName, fromStr, toStr)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest) //400
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	//возвр-ем успешный ответ клиенту
+	json.NewEncoder(w).Encode(output) //код ответа 200
 }

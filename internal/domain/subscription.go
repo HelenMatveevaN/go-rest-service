@@ -41,6 +41,13 @@ type UpdateInput struct {
 	EndDate			**string	`json:"end_date" binding:"omitempty"`	
 }
 
+//структура - ответ ручки для подсчета стоимости
+type GetTotalCostOutput struct {
+	TotalCost int `json:"total_cost"`
+}
+
+//КОНТРАКТЫ:
+
 //описание бизнес-логики для CRUDL
 //прием сырых данных от польз-ля и проверка бизнес-правил
 type SubscriptionService interface {
@@ -49,6 +56,8 @@ type SubscriptionService interface {
 	Update(ctx context.Context, id string, input UpdateInput) (Subscription, error)
 	Delete(ctx context.Context, id string) error
 	List(ctx context.Context, userID string) ([]Subscription, error)
+	//in-фильтры,out-структура ответа
+	GetTotalCost(ctx context.Context, userID, ServiceName, fromDate, toDate string) (GetTotalCostOutput, error)
 }
 
 //описание методов работы с хранилищем (БД)
@@ -59,4 +68,7 @@ type SubscriptionRepository interface {
 	Update(ctx context.Context, sub Subscription) error
 	Delete(ctx context.Context, id string) error
 	List(ctx context.Context, userID string) ([]Subscription, error)
+	//get subscrip-s by userID, filter by ServName
+	GetByFilters(ctx context.Context, userID, ServiceName string) ([]Subscription, error)
 }
+

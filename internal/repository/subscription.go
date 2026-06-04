@@ -67,3 +67,23 @@ func (r *MemoryRepository) List(ctx context.Context, userID string) ([]domain.Su
 	}
 	return list, nil
 }
+
+func (r *MemoryRepository) GetByFilters(ctx context.Context, userID, ServiceName string) ([]domain.Subscription, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	list := make([]domain.Subscription, 0)
+	for _, sub := range r.subscriptions {
+		if sub.UserID != userID {
+			continue
+		}
+
+		if ServiceName != "" && sub.ServiceName != ServiceName {
+			continue
+		}
+
+		list = append(list, sub)
+	}
+
+	return list, nil
+}
